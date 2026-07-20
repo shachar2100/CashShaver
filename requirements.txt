@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+httpx
+pyyaml
+streamlit
+pandas
+mcp[cli]

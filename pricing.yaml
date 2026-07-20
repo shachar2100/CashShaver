@@ -1,0 +1,48 @@
+# Rates in USD per MILLION tokens.
+# Verified against public pricing July 2026 — re-check at:
+#   https://platform.claude.com/docs/en/about-claude/pricing
+# before trusting the numbers, and whenever a new model ships.
+#
+# Matching is by longest prefix of the model string, so
+# "claude-sonnet-4-6-20250929" matches the "claude-sonnet-4-6" entry.
+#
+# cache_write assumes the default 5-minute cache (1.25x input).
+# 1-hour cache writes are billed higher (2x input); if you use ttl=1h
+# heavily, add a dedicated rate and split the columns.
+#
+# NOTE: claude-sonnet-5 is at introductory pricing ($2/$10) through
+# 2026-08-31; standard is $3/$15 after. Update on Sept 1.
+
+models:
+  claude-fable-5:
+    input: 10.00
+    output: 50.00
+    cache_read: 1.00
+    cache_write: 12.50
+
+  claude-opus-4:          # matches opus-4-6, 4-7, 4-8 (all $5/$25)
+    input: 5.00
+    output: 25.00
+    cache_read: 0.50
+    cache_write: 6.25
+
+  claude-sonnet-5:        # INTRO pricing through 2026-08-31
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write: 2.50
+
+  claude-sonnet-4:
+    input: 3.00
+    output: 15.00
+    cache_read: 0.30
+    cache_write: 3.75
+
+  claude-haiku-4:
+    input: 1.00
+    output: 5.00
+    cache_read: 0.10
+    cache_write: 1.25
+
+# Fallback for unrecognized models: logged with cost 0 and a warning,
+# so unknown models are visible in the dashboard instead of mispriced.
