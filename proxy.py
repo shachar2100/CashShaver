@@ -45,7 +45,7 @@ async def startup() -> None:
     global client
     init_db()
     client = httpx.AsyncClient(base_url=UPSTREAM, timeout=httpx.Timeout(600.0, connect=10.0))
-    log.info("Proxying to %s, logging to SQLite", UPSTREAM)
+    log.info("Proxying to %s, logging to MongoDB", UPSTREAM)
 
 
 @app.on_event("shutdown")
@@ -83,6 +83,33 @@ def _system_hash(body: dict) -> str | None:
     return hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
+def _last_user_text(body: dict) -> str | None:
+    """Text of the most recent human-authored message.
+
+    User-role messages containing only tool_result blocks are skipped so
+    tool output isn't mistaken for something the user typed.
+    """
+    for msg in reversed(body.get("messages") or []):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = [b.get("text", "") for b in content
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            if texts:
+                return "\n".join(texts)
+    return None
+
+
+def _response_text(content: list) -> str | None:
+    """Concatenated text blocks from a messages-API response content list."""
+    texts = [b.get("text", "") for b in content
+             if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(texts) if texts else None
+
+
 def _extract_usage_fields(usage: dict) -> dict:
     """Normalize an Anthropic usage object into our column names."""
     return {
@@ -94,7 +121,7 @@ def _extract_usage_fields(usage: dict) -> dict:
 
 
 async def _write_row(row: dict) -> None:
-    """Insert off the event loop so the stream is never blocked on SQLite."""
+    """Insert off the event loop so the stream is never blocked on the DB write."""
     row["cost_usd"] = price(row.get("model"), row)
     try:
         await asyncio.to_thread(insert_request, row)
@@ -104,7 +131,7 @@ async def _write_row(row: dict) -> None:
 
 def _base_row(request: Request, body: dict | None, streaming: bool) -> dict:
     return {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts": datetime.now(timezone.utc),
         "model": (body or {}).get("model"),
         "input_tokens": 0,
         "output_tokens": 0,
@@ -117,6 +144,8 @@ def _base_row(request: Request, body: dict | None, streaming: bool) -> dict:
         "endpoint": request.url.path,
         "user_agent": request.headers.get("user-agent"),
         "system_hash": _system_hash(body) if body else None,
+        "user_message": _last_user_text(body) if body else None,
+        "assistant_message": None,
         "error": None,
     }
 
@@ -133,6 +162,11 @@ class SSETap:
         self.usage: dict = {}
         self.stop_reason: str | None = None
         self.model: str | None = None
+        self._text: list[str] = []
+
+    @property
+    def text(self) -> str | None:
+        return "".join(self._text) or None
 
     def feed(self, chunk: bytes) -> None:
         self._buf += chunk
@@ -167,6 +201,10 @@ class SSETap:
                         self.usage[col] = usage[k]
                 delta = event.get("delta", {})
                 self.stop_reason = delta.get("stop_reason") or self.stop_reason
+            elif etype == "content_block_delta":
+                delta = event.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    self._text.append(delta.get("text", ""))
             elif etype == "error":
                 self.stop_reason = "error"
 
@@ -175,6 +213,9 @@ def _outbound_headers(request: Request) -> dict:
     headers = {
         k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS
     }
+    # Ask upstream for uncompressed bytes: the SSE tap parses the raw relay
+    # stream, and gzip/brotli chunks would be opaque to it.
+    headers["accept-encoding"] = "identity"
     if REAL_KEY:
         headers["x-api-key"] = REAL_KEY
         headers.pop("authorization", None)
@@ -233,6 +274,7 @@ async def relay(request: Request, path: str):
                 row.update(tap.usage)
                 row["model"] = tap.model or row["model"]
                 row["stop_reason"] = tap.stop_reason
+                row["assistant_message"] = tap.text
                 row["latency_ms"] = int((time.monotonic() - started) * 1000)
                 asyncio.create_task(_write_row(row))
 
@@ -251,6 +293,8 @@ async def relay(request: Request, path: str):
                 row.update(_extract_usage_fields(data["usage"]))
                 row["model"] = data.get("model") or row["model"]
                 row["stop_reason"] = data.get("stop_reason")
+            if isinstance(data.get("content"), list):
+                row["assistant_message"] = _response_text(data["content"])
             if data.get("type") == "error":
                 row["error"] = json.dumps(data.get("error"))
     except json.JSONDecodeError:

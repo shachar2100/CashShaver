@@ -5,3 +5,5 @@ pyyaml
 streamlit
 pandas
 mcp[cli]
+python-dotenv
+pymongo

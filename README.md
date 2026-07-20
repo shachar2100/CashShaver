@@ -1,21 +1,26 @@
 # llm-cost-proxy
 
 Transparent Anthropic API proxy that logs every request's tokens and cost to
-SQLite, with a Streamlit dashboard and an MCP server so you can ask Claude
+MongoDB, with a Streamlit dashboard and an MCP server so you can ask Claude
 about your own spend.
 
 ```
 Claude Code ──▶ proxy (:4000) ──▶ api.anthropic.com
                    │
                    ▼
-                usage.db ◀── dashboard.py / mcp_server.py
+                MongoDB ◀── dashboard.py / mcp_server.py
 ```
 
 ## Setup
 
 ```bash
-pip install fastapi uvicorn httpx pyyaml streamlit pandas "mcp[cli]"
+pip install -r requirements.txt
 ```
+
+Copy `.env.example` to `.env` and set `MONGODB_URI` to your MongoDB
+connection string (local instance or Atlas). `MONGODB_DB` and
+`MONGODB_COLLECTION` control where rows land (defaults:
+`llm_cost_proxy.requests`).
 
 ## Run the proxy
 
@@ -37,7 +42,7 @@ export ANTHROPIC_BASE_URL=http://localhost:4000
 ```
 
 That's it — every Claude Code request now flows through the proxy and lands
-as a row in `usage.db`. (If you set `ANTHROPIC_REAL_API_KEY` on the proxy,
+as a document in MongoDB. (If you set `ANTHROPIC_REAL_API_KEY` on the proxy,
 the client-side `ANTHROPIC_API_KEY` can be any placeholder value.)
 
 ## Dashboard
@@ -69,12 +74,13 @@ Tools exposed: `get_spend`, `spend_by_model`, `spend_by_day`,
   this table will undercount — split the rate if that's your workload.
 - **Unknown models** log with cost 0 and a warning rather than a guess, so
   they're visible in the dashboard instead of silently mispriced.
-- **DB location**: defaults to `usage.db` next to the code; override with
-  `LLM_PROXY_DB=/path/to/db`.
+- **DB location**: set `MONGODB_URI` / `MONGODB_DB` / `MONGODB_COLLECTION`
+  in `.env` (defaults: `mongodb://localhost:27017`, `llm_cost_proxy`,
+  `requests`).
 
 ## Sharing with a second person
 
-Deploy the proxy + a volume for the SQLite file on Fly.io or Railway, point
-both machines' `ANTHROPIC_BASE_URL` at it. Add a `user` column keyed off a
-per-person header if you want per-person breakdowns (small change in
-`_base_row`).
+Deploy the proxy on Fly.io or Railway pointed at a shared MongoDB (e.g. an
+Atlas free tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Add a
+`user` field keyed off a per-person header if you want per-person breakdowns
+(small change in `_base_row`).

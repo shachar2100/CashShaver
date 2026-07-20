@@ -4,13 +4,12 @@ Run:  streamlit run dashboard.py
 """
 
 import os
-import sqlite3
 
 import pandas as pd
 import streamlit as st
 import yaml
 
-from db import DB_PATH, init_db
+from db import init_db, recent_requests
 
 st.set_page_config(page_title="LLM spend", layout="wide")
 init_db()
@@ -18,15 +17,9 @@ init_db()
 
 @st.cache_data(ttl=30)
 def load(days: int) -> pd.DataFrame:
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
-        "SELECT * FROM requests WHERE ts >= datetime('now', ?) ORDER BY ts",
-        conn,
-        params=(f"-{days} days",),
-    )
-    conn.close()
+    df = pd.DataFrame(recent_requests(days))
     if not df.empty:
-        df["ts"] = pd.to_datetime(df["ts"], format="ISO8601")
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
         df["day"] = df["ts"].dt.date
     return df
 
@@ -50,7 +43,8 @@ pricing = pricing_table()
 
 
 def saved(row) -> float:
-    model = row["model"] or ""
+    # model is NaN (a float) for requests that failed before a model was known
+    model = row["model"] if isinstance(row["model"], str) else ""
     match = max((p for p in pricing if model.startswith(p)), key=len, default=None)
     if not match:
         return 0.0

@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Local database
+usage.db
+usage.db-wal
+usage.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
