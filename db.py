@@ -31,6 +31,7 @@ def init_db() -> None:
     coll = _collection()
     coll.create_index([("ts", DESCENDING)])
     coll.create_index([("model", ASCENDING)])
+    coll.create_index([("user_email", ASCENDING)])
 
 
 def insert_request(row: dict) -> None:

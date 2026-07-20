@@ -78,16 +78,17 @@ tokens = df.groupby("day")[
 st.area_chart(tokens)
 
 st.subheader("Most expensive requests")
-top = df.nlargest(15, "cost_usd")[
-    ["ts", "model", "input_tokens", "output_tokens", "cache_read_tokens",
-     "cache_write_tokens", "cost_usd", "latency_ms", "stop_reason", "status"]
-]
+top_cols = ["ts", "user_email", "model", "input_tokens", "output_tokens",
+            "cache_read_tokens", "cache_write_tokens", "cost_usd",
+            "latency_ms", "stop_reason", "status"]
+top = df.nlargest(15, "cost_usd")[[c for c in top_cols if c in df.columns]]
 st.dataframe(top, use_container_width=True, hide_index=True)
 
 errors = df[df["error"].notna() | (df["status"] >= 400)]
 if not errors.empty:
     st.subheader(f"Errors ({len(errors)})")
+    err_cols = ["ts", "user_email", "model", "status", "error", "endpoint"]
     st.dataframe(
-        errors[["ts", "model", "status", "error", "endpoint"]],
+        errors[[c for c in err_cols if c in errors.columns]],
         use_container_width=True, hide_index=True,
     )

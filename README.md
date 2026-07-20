@@ -45,6 +45,41 @@ That's it — every Claude Code request now flows through the proxy and lands
 as a document in MongoDB. (If you set `ANTHROPIC_REAL_API_KEY` on the proxy,
 the client-side `ANTHROPIC_API_KEY` can be any placeholder value.)
 
+### Tag requests with your email
+
+So the dashboard / MongoDB can show who made each request, send a custom
+header from Claude Code via `ANTHROPIC_CUSTOM_HEADERS`.
+
+Single header:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="X-User-Email: alice@example.com"
+```
+
+Multiple headers (newline-separated; use `\n` in shell or settings JSON):
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS=$'X-User-Email: alice@example.com\nX-Team: research'
+```
+
+Or in Claude Code settings (`~/.claude/settings.json`):
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:4000",
+    "ANTHROPIC_CUSTOM_HEADERS": "X-User-Email: alice@example.com"
+  }
+}
+```
+
+| Header          | Stored as     | Notes                                      |
+|-----------------|---------------|--------------------------------------------|
+| `X-User-Email`  | `user_email`  | Used for attribution in MongoDB / dashboard |
+
+The proxy reads `X-User-Email` and **does not forward it** to Anthropic.
+Without the header, `user_email` is logged as `null`.
+
 ## Dashboard
 
 ```bash
@@ -81,6 +116,6 @@ Tools exposed: `get_spend`, `spend_by_model`, `spend_by_day`,
 ## Sharing with a second person
 
 Deploy the proxy on Fly.io or Railway pointed at a shared MongoDB (e.g. an
-Atlas free tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Add a
-`user` field keyed off a per-person header if you want per-person breakdowns
-(small change in `_base_row`).
+Atlas free tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Have
+each person set their own `X-User-Email` via `ANTHROPIC_CUSTOM_HEADERS` so
+spend breaks down per person in MongoDB.

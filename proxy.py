@@ -37,7 +37,11 @@ with open(os.path.join(os.path.dirname(__file__), "pricing.yaml")) as f:
     PRICING: dict = yaml.safe_load(f)["models"]
 
 # Headers that must not be blindly forwarded in either direction.
-HOP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "keep-alive"}
+# x-user-email is ours (attribution only) — strip it before calling Anthropic.
+HOP_HEADERS = {
+    "host", "content-length", "transfer-encoding", "connection", "keep-alive",
+    "x-user-email",
+}
 
 
 @app.on_event("startup")
@@ -143,6 +147,8 @@ def _base_row(request: Request, body: dict | None, streaming: bool) -> dict:
         "status": None,
         "endpoint": request.url.path,
         "user_agent": request.headers.get("user-agent"),
+        # Clients set this via ANTHROPIC_CUSTOM_HEADERS="X-User-Email: you@example.com"
+        "user_email": request.headers.get("x-user-email"),
         "system_hash": _system_hash(body) if body else None,
         "user_message": _last_user_text(body) if body else None,
         "assistant_message": None,
