@@ -113,9 +113,25 @@ Tools exposed: `get_spend`, `spend_by_model`, `spend_by_day`,
   in `.env` (defaults: `mongodb://localhost:27017`, `llm_cost_proxy`,
   `requests`).
 
+## Deploy (Railway)
+
+The repo includes a `Dockerfile` that runs only the proxy (not the dashboard
+or MCP server). On Railway:
+
+1. Deploy from the GitHub repo.
+2. Set Variables: `MONGODB_URI` (Atlas URI), and optionally `MONGODB_DB` /
+   `MONGODB_COLLECTION`.
+3. In Atlas → Network Access, allow `0.0.0.0/0` (or Railway's IPs).
+4. Generate a public domain, then on each client:
+
+```bash
+export ANTHROPIC_BASE_URL=https://your-app.up.railway.app
+export ANTHROPIC_CUSTOM_HEADERS="X-User-Email: you@example.com"
+```
+
 ## Sharing with a second person
 
-Deploy the proxy on Fly.io or Railway pointed at a shared MongoDB (e.g. an
-Atlas free tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Have
-each person set their own `X-User-Email` via `ANTHROPIC_CUSTOM_HEADERS` so
-spend breaks down per person in MongoDB.
+Deploy the proxy on Railway pointed at a shared MongoDB (e.g. an Atlas free
+tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Have each person
+set their own `X-User-Email` via `ANTHROPIC_CUSTOM_HEADERS` so spend breaks
+down per person in MongoDB.
