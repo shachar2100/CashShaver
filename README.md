@@ -37,48 +37,33 @@ uvicorn proxy:app --port 4000
 
 ## Point Claude Code at it
 
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:4000
-```
-
-That's it — every Claude Code request now flows through the proxy and lands
-as a document in MongoDB. (If you set `ANTHROPIC_REAL_API_KEY` on the proxy,
-the client-side `ANTHROPIC_API_KEY` can be any placeholder value.)
-
-### Tag requests with your email
-
-So the dashboard / MongoDB can show who made each request, send a custom
-header from Claude Code via `ANTHROPIC_CUSTOM_HEADERS`.
-
-Single header:
+Put your username in the base URL path so every request is attributed:
 
 ```bash
-export ANTHROPIC_CUSTOM_HEADERS="X-User-Email: alice@example.com"
+# local
+export ANTHROPIC_BASE_URL=http://localhost:4000/alice
+
+# Cloud Run
+export ANTHROPIC_BASE_URL=https://cashshaver-proxy-xxxxx.run.app/alice
 ```
 
-Multiple headers (newline-separated; use `\n` in shell or settings JSON):
-
-```bash
-export ANTHROPIC_CUSTOM_HEADERS=$'X-User-Email: alice@example.com\nX-Team: research'
-```
+Claude Code then calls `/alice/v1/messages`; the proxy stores `username: "alice"`
+and forwards `/v1/messages` to Anthropic. Usernames are letters/digits plus
+`.`, `_`, `-` (max 64 chars).
 
 Or in Claude Code settings (`~/.claude/settings.json`):
 
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:4000",
-    "ANTHROPIC_CUSTOM_HEADERS": "X-User-Email: alice@example.com"
+    "ANTHROPIC_BASE_URL": "https://cashshaver-proxy-xxxxx.run.app/alice"
   }
 }
 ```
 
-| Header          | Stored as     | Notes                                      |
-|-----------------|---------------|--------------------------------------------|
-| `X-User-Email`  | `user_email`  | Used for attribution in MongoDB / dashboard |
-
-The proxy reads `X-User-Email` and **does not forward it** to Anthropic.
-Without the header, `user_email` is logged as `null`.
+Without a username prefix (`…run.app` with no path), `username` is logged as
+`null`. (If you set `ANTHROPIC_REAL_API_KEY` on the proxy, the client-side
+`ANTHROPIC_API_KEY` can be any placeholder value.)
 
 ## Dashboard
 
@@ -113,25 +98,42 @@ Tools exposed: `get_spend`, `spend_by_model`, `spend_by_day`,
   in `.env` (defaults: `mongodb://localhost:27017`, `llm_cost_proxy`,
   `requests`).
 
-## Deploy (Railway)
+## Deploy (Google Cloud Run)
 
-The repo includes a `Dockerfile` that runs only the proxy (not the dashboard
-or MCP server). On Railway:
+The repo includes a `Dockerfile` + `deploy-cloudrun.sh` that run **only the
+proxy** (not the dashboard or MCP server). Transparent mode: do **not** set
+`ANTHROPIC_REAL_API_KEY` on Cloud Run — clients keep using their own keys.
 
-1. Deploy from the GitHub repo.
-2. Set Variables: `MONGODB_URI` (Atlas URI), and optionally `MONGODB_DB` /
-   `MONGODB_COLLECTION`.
-3. In Atlas → Network Access, allow `0.0.0.0/0` (or Railway's IPs).
-4. Generate a public domain, then on each client:
+### One-time setup
 
 ```bash
-export ANTHROPIC_BASE_URL=https://your-app.up.railway.app
-export ANTHROPIC_CUSTOM_HEADERS="X-User-Email: you@example.com"
+# gcloud is installed via: brew install --cask google-cloud-sdk
+gcloud auth login
+gcloud auth application-default login
+```
+
+Create (or pick) a GCP project with billing enabled, then in Atlas →
+**Network Access** allow `0.0.0.0/0` so Cloud Run can reach MongoDB.
+
+### Deploy
+
+```bash
+# from the repo root; script reads MONGODB_* from .env
+./deploy-cloudrun.sh YOUR_GCP_PROJECT_ID us-east1
+```
+
+That enables Cloud Run / Cloud Build, builds the container from the
+`Dockerfile`, and sets `MONGODB_URI` / `MONGODB_DB` / `MONGODB_COLLECTION`.
+
+### Point Claude Code at it
+
+```bash
+export ANTHROPIC_BASE_URL=https://cashshaver-proxy-xxxxx-ue.a.run.app/alice
+claude
 ```
 
 ## Sharing with a second person
 
-Deploy the proxy on Railway pointed at a shared MongoDB (e.g. an Atlas free
-tier), and point both machines' `ANTHROPIC_BASE_URL` at it. Have each person
-set their own `X-User-Email` via `ANTHROPIC_CUSTOM_HEADERS` so spend breaks
-down per person in MongoDB.
+Deploy once to Cloud Run against shared Atlas. Each person uses the same host
+with their own username path, e.g. `…run.app/alice` vs `…run.app/bob`, so
+spend breaks down per person in MongoDB.

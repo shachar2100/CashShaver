@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -37,19 +38,39 @@ with open(os.path.join(os.path.dirname(__file__), "pricing.yaml")) as f:
     PRICING: dict = yaml.safe_load(f)["models"]
 
 # Headers that must not be blindly forwarded in either direction.
-# x-user-email is ours (attribution only) — strip it before calling Anthropic.
-HOP_HEADERS = {
-    "host", "content-length", "transfer-encoding", "connection", "keep-alive",
-    "x-user-email",
-}
+HOP_HEADERS = {"host", "content-length", "transfer-encoding", "connection", "keep-alive"}
+
+# Path prefix identity: ANTHROPIC_BASE_URL=https://host/<username>
+# e.g. /alice/v1/messages → username=alice, upstream=/v1/messages
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _split_user_path(path: str) -> tuple[str | None, str]:
+    """Peel optional /<username> prefix when the rest is an Anthropic /v1/... path."""
+    parts = [p for p in path.strip("/").split("/") if p]
+    if (
+        len(parts) >= 2
+        and parts[1] == "v1"
+        and _USERNAME_RE.fullmatch(parts[0])
+    ):
+        return parts[0], "/".join(parts[1:])
+    return None, "/".join(parts)
 
 
 @app.on_event("startup")
 async def startup() -> None:
     global client
-    init_db()
+    # Bind/listen first — never block Cloud Run's PORT health check on Mongo.
     client = httpx.AsyncClient(base_url=UPSTREAM, timeout=httpx.Timeout(600.0, connect=10.0))
-    log.info("Proxying to %s, logging to MongoDB", UPSTREAM)
+    log.info("Proxying to %s", UPSTREAM)
+    try:
+        await asyncio.to_thread(init_db)
+        log.info("MongoDB indexes ready (%s / %s)", os.environ.get("MONGODB_DB"),
+                 os.environ.get("MONGODB_COLLECTION"))
+    except Exception:
+        log.exception(
+            "MongoDB unreachable at startup — proxy is up, logging will retry on each request"
+        )
 
 
 @app.on_event("shutdown")
@@ -133,7 +154,14 @@ async def _write_row(row: dict) -> None:
         log.exception("Failed to write usage row")
 
 
-def _base_row(request: Request, body: dict | None, streaming: bool) -> dict:
+def _base_row(
+    request: Request,
+    body: dict | None,
+    streaming: bool,
+    *,
+    username: str | None,
+    upstream_path: str,
+) -> dict:
     return {
         "ts": datetime.now(timezone.utc),
         "model": (body or {}).get("model"),
@@ -145,10 +173,10 @@ def _base_row(request: Request, body: dict | None, streaming: bool) -> dict:
         "stop_reason": None,
         "streaming": int(streaming),
         "status": None,
-        "endpoint": request.url.path,
+        "endpoint": f"/{upstream_path}" if upstream_path else "/",
         "user_agent": request.headers.get("user-agent"),
-        # Clients set this via ANTHROPIC_CUSTOM_HEADERS="X-User-Email: you@example.com"
-        "user_email": request.headers.get("x-user-email"),
+        # From ANTHROPIC_BASE_URL=https://host/<username>
+        "username": username,
         "system_hash": _system_hash(body) if body else None,
         "user_message": _last_user_text(body) if body else None,
         "assistant_message": None,
@@ -230,6 +258,7 @@ def _outbound_headers(request: Request) -> dict:
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def relay(request: Request, path: str):
+    username, upstream_path = _split_user_path(path)
     raw_body = await request.body()
     body: dict | None = None
     if raw_body:
@@ -238,12 +267,14 @@ async def relay(request: Request, path: str):
         except json.JSONDecodeError:
             body = None
     streaming = bool(body and body.get("stream"))
-    row = _base_row(request, body, streaming)
+    row = _base_row(
+        request, body, streaming, username=username, upstream_path=upstream_path,
+    )
     started = time.monotonic()
 
     upstream_req = client.build_request(
         request.method,
-        f"/{path}" + (f"?{request.url.query}" if request.url.query else ""),
+        f"/{upstream_path}" + (f"?{request.url.query}" if request.url.query else ""),
         headers=_outbound_headers(request),
         content=raw_body or None,
     )

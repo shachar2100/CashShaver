@@ -1,0 +1,14 @@
+.venv
+.git
+__pycache__
+*.pyc
+.env
+.env.*
+usage.db*
+dashboard.py
+mcp_server.py
+test_mock_upstream.py
+README.md
+.railway*
+railway.json
+Procfile

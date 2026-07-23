@@ -23,15 +23,24 @@ def _collection():
     """Lazily created shared client; pymongo pools connections internally."""
     global _client
     if _client is None:
-        _client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=10_000)
+        if not MONGODB_URI:
+            raise RuntimeError("MONGODB_URI is not set")
+        _client = MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=5_000,
+            connectTimeoutMS=5_000,
+        )
     return _client[MONGODB_DB][MONGODB_COLLECTION]
 
 
 def init_db() -> None:
+    """Ensure indexes exist. Safe to call repeatedly; raises if Mongo is down."""
     coll = _collection()
+    # Force a round-trip so misconfigured URI/network fails loudly here.
+    coll.database.client.admin.command("ping")
     coll.create_index([("ts", DESCENDING)])
     coll.create_index([("model", ASCENDING)])
-    coll.create_index([("user_email", ASCENDING)])
+    coll.create_index([("username", ASCENDING)])
 
 
 def insert_request(row: dict) -> None:
